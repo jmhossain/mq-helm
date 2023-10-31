@@ -28,44 +28,35 @@ PASSWORD=password
 echo "#### Create a private key and certificate in PEM format, for the server to use"
 openssl req \
        -newkey rsa:2048 -nodes -keyout ${KEY} \
-       -subj "/CN=mq queuemanager/OU=ibm mq" \
+       -subj "/CN=queuemanager/OU=mq" \
        -x509 -days 3650 -out ${CERT}
 
-openssl pkcs12 -export -out ${KEYP12} -inkey ${KEY} -in ${CERT} -passout pass:password
 
 # Create a private key and certificate in PEM format, for the application to use
 echo "#### Create a private key and certificate in PEM format, for the application to use"
 openssl req \
        -newkey rsa:2048 -nodes -keyout ${KEY_APP} \
-       -subj "/CN=application1/OU=app team1" \
+       -subj "/OU=team1/CN=service1" \
        -x509 -days 3650 -out ${CERT_APP}
 
-openssl pkcs12 -export -out ${KEYP12_APP} -inkey ${KEY_APP} -in ${CERT_APP} -passout pass:password
 
 # Add the key and certificate to a kdb key store, for the server to use
 echo "#### Creating kdb key store, for the server to use"
-runmqckm -keydb -create -db ${KEYDB} -pw ${PASSWORD} -type cms -stash
-echo "#### Adding certs and keys to kdb key store, for the server to use"
-runmqckm -cert -add -db ${KEYDB} -file ${CERT_APP} -stashed
-runmqckm -cert -import -file ${KEYP12} -pw password -target ${KEYDB} -target_stashed
+/opt/mqm/bin/runmqakm -keydb -create -db ${KEYDB} -pw ${PASSWORD} -type cms -expire 1000 -stash
+echo "#### Adding public cert to kdb key store, for the server to use"
+/opt/mqm/bin/runmqakm -cert -add -db ${KEYDB} -stashed -trust enable -file ${CERT_APP} -label "OU=team1,CN=service1"
+echo "#### Adding private key to kdb key store, for the server to use"
+openssl pkcs12 -export -out ${KEYP12} -inkey ${KEY} -in ${CERT} -passout pass:password -name default
+/opt/mqm/bin/runmqakm -cert -import -file ${KEYP12} -pw password -type pkcs12 -target ${KEYDB} -target_stashed -target_type cms
+keytool -importkeystore -srckeystore application.p12 -destkeystore server.jks -srcstoretype pkcs12 -alias "OU=team1,CN=service1" -storepass password -srcstorepass password
 
 # Add the key and certificate to a kdb key store, for the application to use
 echo "#### Add the key and certificate to a kdb key store, for the application to use"
-runmqckm -keydb -create -db ${KEYDB_APP} -pw ${PASSWORD} -type cms -stash
-echo "#### Adding certs and keys to kdb key store, for the application to use"
-runmqckm -cert -add -db ${KEYDB_APP} -file ${CERT} -stashed
-runmqckm -cert -import -file ${KEYP12_APP} -pw password -target ${KEYDB_APP} -target_stashed -label 1 -new_label aceclient
+/opt/mqm/bin/runmqakm -keydb -create -db ${KEYDB_APP} -pw ${PASSWORD} -type cms -expire 1000 -stash
+echo "#### Adding public cert to kdb key store, for the application to use"
+/opt/mqm/bin/runmqakm -cert -add -db ${KEYDB_APP} -stashed -trust enable -file ${CERT} -label default
+echo "#### Adding private key to kdb key store, for the server to use"
+openssl pkcs12 -export -out ${KEYP12_APP} -inkey ${KEY_APP} -in ${CERT_APP} -passout pass:password -name "OU=team1,CN=service1"
+/opt/mqm/bin/runmqakm -cert -import -file ${KEYP12_APP} -pw password -type pkcs12 -target ${KEYDB_APP} -target_stashed -target_type cms
 
-# Add the certificate to a trust store in JKS format, for Server to use when connecting
-echo "#### Creating JKS format, for Server to use when connecting"
-runmqckm -keydb -create -db server.jks -type jks -pw password
-echo "#### Adding certs and keys to JKS"
-runmqckm -cert -add -db server.jks -file ${CERT_APP} -pw password
-runmqckm -cert -import -file ${KEYP12} -pw password -target server.jks -target_pw password
-
-# Add the certificate to a trust store in JKS format, for Client to use when connecting
-echo "#### Creating JKS format, for application to use when connecting"
-runmqckm -keydb -create -db application.jks -type jks -pw password
-echo "#### Adding certs and keys to JKS"
-runmqckm -cert -add -db application.jks -file ${CERT} -pw password
-runmqckm -cert -import -file ${KEYP12_APP} -pw password -target application.jks -target_pw password
+keytool -import -trustcacerts -alias default -file ${CERT} -keystore application.jks -storepass password  
